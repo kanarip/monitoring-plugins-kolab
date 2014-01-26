@@ -38,6 +38,11 @@ $plugin->add_arg(
     );
 
 $plugin->add_arg(
+        spec => "imap-mailbox=s",
+        help => "IMAP mailbox to search for the message."
+    );
+
+$plugin->add_arg(
         spec => "imap-password=s",
         help => "Password for IMAP specifically."
     );
