@@ -259,6 +259,15 @@ until( scalar(@msgs) != 0 || $tries >= $max_retries ) {
         (scalar(@msgs) != 0 || $tries >= $max_retries);
 }
 
+if (scalar(@msgs) > 0) {
+    $imap->set_flag("Seen", @msgs);
+}
+
+$imap->delete_message(scalar($imap->seen))
+    or warn "Could not delete messages: $@\n";
+
+$imap->expunge($mailbox);
+
 my $time_end = time;
 
 if (scalar(@msgs) > 1) {
