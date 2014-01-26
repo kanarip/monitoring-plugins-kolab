@@ -1,0 +1,40 @@
+#! /usr/bin/perl -w
+
+use Nagios::Plugin;
+
+use vars qw($msg $state);
+
+my $plugin = Nagios::Plugin->new(
+        usage => "Usage: %s [ -v|--verbose ]  [-H <host>] [-t <timeout>] "
+            . "[ -c|--critical=<threshold> ] [ -w|--warning=<threshold> ] "
+            . "[ -u|--user=<username> ] [ -p|--password=<password> ]"
+    );
+
+$plugin->add_arg(
+        spec => "user|u=s",
+        help => "-u, --user=STRING .  Username to use."
+    );
+
+$plugin->add_arg(
+        spec => "password|p=s",
+        help => "-p, --password=STRING .  Password to use."
+    );
+
+$plugin->getopts();
+
+my $result = system(
+        "/usr/sbin/testsaslauthd"
+            . " -u " . $plugin->opts->user
+            . " -p " . $plugin->opts->password
+            . " > /dev/null 2>&1"
+    );
+
+if ($result) {
+    $msg = "CRITICAL: authentication failed for " . $plugin->opts->user;
+    $state = CRITICAL;
+} else {
+    $msg = "OK: authentication for " . $plugin->opts->user . " successful";
+    $state = OK;
+}
+
+$plugin->nagios_exit($state, $msg);
