@@ -1,0 +1,149 @@
+#!/bin/sh
+
+# Copyright (C) 2012 Jeroen van Meeuwen (Kolab Systems) <vanmeeuwen@kolabsys.com>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Library General Public License as published by
+# the Free Software Foundation; version 2 only
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU Library General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+
+#
+# Plugin to graph;
+#
+# - the average duration of mail previews in Roundcube
+#
+# Usage: Link or copy into the munin-node plugin directory
+#
+# Installation node: Should most likely run as root:
+# [rc-mailpreview]
+# user root
+#
+#
+# Magic markers (optional - only used by munin-config and some
+# installation scripts):
+#
+#%# family=contrib
+#%# capabilities=autoconf
+
+# IMAP Configuration Directory
+if [ "$1" = "autoconf" ]; then
+    echo yes
+    exit 0
+fi
+
+declare -A averages=()
+
+function roundcubemail_logs() {
+    find /var/log/roundcubemail/ -type f -name "console" -o -name "console-*" -a ! -name "console-*.gz"
+}
+
+function roundcubemail_actions() {
+    for action in `cat $(roundcubemail_logs) | awk '{print $4}' | grep -E "^[a-z\/]+" | sort | uniq`; do
+        _action=$(echo ${action} | sed -e 's/\//_/g' -e 's/\./_/g' -e 's/\-/_/g')
+        echo "${action} ${_action}"
+    done
+}
+
+function roundcubemail_action_average() {
+    average=`grep "${1}" $(roundcubemail_logs) | awk '{sum+=$8} END {print sum/NR}' 2>/dev/null`
+    echo "${average}"
+}
+
+function httpd_log_files() {
+    find /var/log/httpd/ -type f -name "*access_log" -o -name "*access_log-*" -a ! -name "*access_log-*.gz"
+}
+
+# If run with the "config"-parameter, give out information on how the
+# graphs should look.
+if [ "$1" = "config" ]; then
+    echo "multigraph roundcubemail"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_title Action Completion Duration"
+    echo "graph_args --base 1000 -l 0"
+    echo "graph_vlabel seconds"
+    echo "graph_scale no"
+    echo "graph_category roundcubemail"
+    echo "graph_info Average times reported on actions."
+    echo "graph_order $(roundcubemail_actions | while read action _action; do
+        echo -n " ${_action}=roundcubemail.${_action}.${_action}"
+    done)"
+    echo ""
+    roundcubemail_actions | while read action _action; do
+        echo "roundcubemail.${_action}.label ${action}"
+        echo "roundcubemail.${_action}.type GAUGE"
+    done
+    echo ""
+
+    roundcubemail_actions | while read action _action; do
+        echo "multigraph roundcubemail.${_action}"
+        echo "graph_args --base 1000 -l 0"
+        echo "graph_title ${action}"
+        echo "graph_args --base 1000 -l 0"
+        echo "graph_vlabel seconds"
+        echo "graph_scale no"
+        echo "graph_category roundcubemail"
+        echo "graph_info Average times reported for ${action}."
+        echo ""
+        echo "${_action}.label ${action}"
+        echo "${_action}.type GAUGE"
+        echo ""
+    done
+    echo ""
+
+#     echo "graph_title MSIE HTTP Client Access"
+#     echo "graph_args --base 1000 -l 0"
+#     echo "graph_vlabel hits"
+#     echo "graph_scale no"
+#     echo "graph_category apache"
+#     echo "graph_info Number of hits per MSIE version"
+#     for vernumber in `grep -E "MSIE [0-9]+\.[0-9]+" $(httpd_log_files) | awk '{print $15}' | sort -u | sed -e 's/\.//g' -e 's/;//g'`; do
+#         graph_order="${graph_order} msie_${vernumber}"
+#         echo "msie_${vernumber}.label MSIE ${vernumber}  % of hits"
+#         echo "msie_${vernumber}.type GAUGE"
+#         echo "msie_${vernumber}.info Percentage of hits for MSIE ${vernumber}"
+#     done
+    # Last, if run with the "config"-parameter, quit here (don't
+    # display any data)
+    exit 0
+fi
+
+# Gather shit
+# declare -a ver
+# declare -a num
+#
+# IFS=$'\n'
+# for agent_line in `grep -E "MSIE [0-9]+\.[0-9]+" $(httpd_log_files) | awk '{print $14,$15}' | sort | uniq -c | sed -e 's/\.//g' -e 's/;//g'`; do
+#     num[${#ver[@]}]=$(echo $agent_line | awk '{print $1}')
+#     ver[${#ver[@]}]=$(echo $agent_line | awk '{print $3}')
+# done
+#
+# i=0
+# total=0
+# while [ $i -lt ${#num[@]} ]; do
+#     total=$(( $total + ${num[$i]} ))
+#     let i++
+# done
+#
+# i=0
+# while [ $i -lt ${#ver[@]} ]; do
+#     percentage=$(echo "( ${num[$i]} * 100 ) / $total" | bc)
+#     echo "msie_${ver[$i]}.value $percentage"
+#     let i++
+# done
+# echo ""
+
+# roundcubemail_actions
+roundcubemail_actions | while read action _action; do
+    echo "multigraph roundcubemail.${_action}"
+    echo "${_action}.value $(roundcubemail_action_average "${action}")"
+    echo ""
+done

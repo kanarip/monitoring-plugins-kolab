@@ -1,0 +1,245 @@
+#!/usr/bin/perl
+
+use Data::Dumper;
+use Nagios::Plugin;
+use POSIX qw(strftime);
+use vars qw($msg $state);
+
+my $plugin = Nagios::Plugin->new(
+        usage => "Usage: %s [ -v|--verbose ]  [ -h|--help ] [--usage] "
+            . "[ -c|--critical=<threshold> ] [ -w|--warning=<threshold> ] "
+            . "[ -t|--timeout=<seconds> ] ",
+
+        version => "0.1.1",
+        url => "http://kolab.org/about/nagios-plugins-kolab",
+        license => "GPLv2+"
+    );
+
+$plugin->add_arg(
+        spec => "critical|c=i",
+        help => "Exit with CRITICAL after <threshold> seconds have passed."
+    );
+
+$plugin->add_arg(
+        spec => "debug",
+        help => "Enable debugging."
+    );
+
+$plugin->add_arg(
+        spec => "hostname|H=s",
+        help => "Server address to check"
+    );
+
+$plugin->add_arg(
+        spec => "mail-from=s",
+        help => "Use MAIL FROM address STRING"
+    );
+
+$plugin->add_arg(
+        spec => "mail-to=s",
+        help => "Use RCPT TO address STRING"
+    );
+
+$plugin->add_arg(
+        spec => "mail-subject=s",
+        help => "Specify mail subject"
+    );
+
+$plugin->add_arg(
+        spec => "mail-header=s@",
+        help => "Specify additional mail headers"
+    );
+
+$plugin->add_arg(
+        spec => "password|smtp-password|P=s",
+        help => "Password"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-port=i",
+        help => "SMTP port number"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-server=s",
+        help => "SMTP server address, if different from --hostname"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-timeout=i",
+        help => "SMTP timeout"
+    );
+
+$plugin->add_arg(
+        spec => "ssl|smtp-ssl",
+        help => "Use SSL (implicit SSL)"
+    );
+
+$plugin->add_arg(
+        spec => "starttls|smtp-starttls",
+        help => "Use STARTTLS (explicit SSL)"
+    );
+
+$plugin->add_arg(
+        spec => "username|smtp-username|U=s",
+        help => "Username"
+    );
+
+$plugin->add_arg(
+        spec => "warning|w=i",
+        help => "Exit with WARNING after <threshold> seconds have passed."
+    );
+
+$plugin->getopts();
+
+# print Dumper($plugin->opts) . "\n";
+
+##
+## Parse options to get to defaults
+##
+
+my $time_start = time;
+
+# The host address(es) to check
+if (!$plugin->opts->hostname) {
+    $plugin->nagios_exit(ERROR, "No hostname for SMTP specified")
+        unless $plugin->opts->{'smtp-server'};
+
+} else {
+    $plugin->opts->{'smtp-server'} = $plugin->opts->hostname
+        unless $plugin->opts->{'smtp-server'};
+
+    delete $plugin->opts->{'hostname'};
+}
+
+# SSL or STARTTLS?
+if ($plugin->opts->starttls && $plugin->opts->ssl) {
+    $plugin->nagios_exit(ERROR, "Cannot specify both starttls and ssl");
+} elsif ($plugin->opts->starttls) {
+    $plugin->opts->{'smtp-starttls'} = $plugin->opts->starttls
+        unless $plugin->opts->{'smtp-starttls'};
+
+    delete $plugin->opts->{'starttls'};
+} elsif ($plugin->opts->ssl) {
+    $plugin->opts->{'smtp-ssl'} = $plugin->opts->ssl
+        unless $plugin->opts->{'smtp-ssl'};
+
+    delete $plugin->opts->{'ssl'};
+}
+
+# Plugin specific timeouts
+$plugin->opts->{'smtp-timeout'} = $plugin->opts->timeout
+    unless $plugin->opts->{'smtp-timeout'};
+
+if ($plugin->opts->username) {
+    $plugin->opts->{'smtp-username'} = $plugin->opts->username
+        unless $plugin->opts->{'smtp-username'};
+
+}
+
+if ($plugin->opts->password) {
+    $plugin->opts->{'smtp-password'} = $plugin->opts->password
+        unless $plugin->opts->{'smtp-password'};
+
+}
+
+if ($plugin->opts->{'smtp-ssl'} or $plugin->opts->{'smtp-starttls'}) {
+    eval "require Net::SMTP::SSL";
+    $plugin->nagios_exit(ERROR, "Could not load Net::SMTP::SSL") if $@;
+    require Net::SMTP::SSL;
+}
+
+if ($plugin->opts->{'smtp-username'}) {
+    eval "require Authen::SASL";
+    $plugin->nagios_exit(ERROR, "Could not load Authen::SASL") if $@;
+}
+
+##
+## Set our own timeout
+##
+local $SIG{ALRM} = sub {
+        $plugin->nagios_exit(
+                CRITICAL,
+                "Exceeded " . $plugin->opts->timeout . " seconds timeout"
+            );
+
+    };
+
+alarm $plugin->opts->timeout;
+
+require Net::SMTP;
+
+# Connect to SMTP
+$smtp = Net::SMTP->new(
+        $plugin->opts->{'smtp-server'},
+        Port => $plugin->opts->{'smtp-port'},
+        Timeout => $plugin->opts->{'smtp-timeout'},
+        Debug => $plugin->opts->debug
+    );
+
+if ($plugin->opts->{'smtp-ssl'}) {
+    $smtp = Net::SMTP::SSL->start_SSL(
+            $smtp,
+            SSL_verify_mode => SSL_VERIFY_NONE
+        );
+    $plugin->nagios_exit(CRITICAL, "Could not start TLS")
+        unless $smtp->code == 220;
+
+} elsif ($plugin->opts->{'smtp-starttls'}) {
+    $smtp->command('STARTTLS');
+    $smtp->response();
+    $plugin->nagios_exit(CRITICAL, "Could not start TLS")
+        unless $smtp->code == 220;
+
+    $smtp = Net::SMTP::SSL->start_SSL(
+            $smtp,
+            SSL_verify_mode => SSL_VERIFY_NONE
+        );
+
+    $smtp->hello();
+}
+
+if ($plugin->opts->{'smtp-username'} && $plugin->opts->{'smtp-password'}) {
+    $smtp->auth(
+            $plugin->opts->username,
+            $plugin->opts->password
+        );
+}
+
+$smtp->mail($plugin->opts->{'mail-from'});
+$smtp->to($plugin->opts->{'mail-to'});
+$smtp->data();
+$smtp->datasend("Subject: " . $plugin->opts->{'mail-subject'} . "\n");
+$smtp->datasend(rfc2822_date() . "\n");
+$smtp->datasend(rfc2822_msgid() . "\n");
+$smtp->datasend("To: " . $plugin->opts->{'mail-to'} . "\n");
+$smtp->datasend("From: " . $plugin->opts->{'mail-from'} . "\n");
+
+foreach (@{$plugin->opts->{'mail-header'}}) {
+    $smtp->datasend("$_\n");
+}
+
+$smtp->datasend("\n");
+$smtp->datasend("This is a message\n");
+$smtp->dataend();
+$smtp->quit();
+
+my $time_end = time;
+
+$plugin->nagios_exit(
+        OK,
+        "Message sent in " . ($time_end - $time_start) . " second(s)."
+    );
+
+# RFC 2822 date
+sub rfc2822_date {
+    return strftime("Date: %a, %e %b %Y %H:%M:%S %z (%Z)", gmtime);
+}
+
+# RFC 2822 message id
+sub rfc2822_msgid {
+    my $hostname = `hostname`;
+    chomp $hostname;
+    return "Message-ID: <" . rand(0xffffffff) . ".nagios@" . $hostname . ">";
+}
+

@@ -1,0 +1,327 @@
+#!/usr/bin/perl
+
+use Data::Dumper;
+use Nagios::Plugin;
+use vars qw($msg $state);
+
+my $plugin = Nagios::Plugin->new(
+        usage => "Usage: %s [ -v|--verbose ]  [ -h|--help ] [--usage] "
+            . "[ -c|--critical=<threshold> ] [ -w|--warning=<threshold> ] "
+            . "[ -t|--timeout=<seconds> ]  [--libexec=<libexec>] "
+            . "[ -p|--plugins=<plugins> ]  [ -A|--alert=<alert_num> ] ",
+
+        version => "0.1.1",
+        url => "http://kolab.org/about/nagios-plugins-kolab",
+        license => "GPLv2+"
+    );
+
+$plugin->add_arg(
+        spec => "critical|c=i",
+        help => "Exit with CRITICAL after <threshold> seconds have passed."
+    );
+
+$plugin->add_arg(
+        spec => "debug",
+        help => "Enable debugging."
+    );
+
+$plugin->add_arg(
+        spec => "hostname|H=s",
+        help => "Server address to check. Will be used for both IMAP and SMTP "
+            . "unless either or both are separately specified."
+    );
+
+$plugin->add_arg(
+        spec => "imap-check-interval=i",
+        help => "Number of seconds between checks against IMAP to attempt to "
+            . "find the message."
+    );
+
+$plugin->add_arg(
+        spec => "imap-password=s",
+        help => "Password for IMAP specifically."
+    );
+
+$plugin->add_arg(
+        spec => "imap-port=i",
+        help => "IMAP port number."
+    );
+
+$plugin->add_arg(
+        spec => "imap-server=s",
+        help => "IMAP server address, if different from --hostname."
+    );
+
+$plugin->add_arg(
+        spec => "imap-starttls",
+        help => "Use STARTTLS (explicit SSL)"
+    );
+
+$plugin->add_arg(
+        spec => "imap-username=s",
+        help => "Username for IMAP specifically."
+    );
+$plugin->add_arg(
+        spec => "imap-ssl",
+        help => "Use SSL (implicit)"
+    );
+
+$plugin->add_arg(
+        spec => "imap-timeout=i",
+        help => "IMAP timeout"
+    );
+
+$plugin->add_arg(
+        spec => "mail-from=s",
+        help => "Use MAIL FROM address STRING"
+    );
+
+$plugin->add_arg(
+        spec => "mail-to=s",
+        help => "Use RCPT TO address STRING"
+    );
+
+$plugin->add_arg(
+        spec => "mail-subject=s",
+        help => "Specify mail subject"
+    );
+
+$plugin->add_arg(
+        spec => "mail-header=s@",
+        help => "Specify additional mail headers"
+    );
+
+$plugin->add_arg(
+        spec => "password=s",
+        help => "Password"
+    );
+
+$plugin->add_arg(
+        spec => "plugins=s@",
+        help => "Plugin commands to execute"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-password=s",
+        help => "Password"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-port=i",
+        help => "SMTP port number"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-server=s",
+        help => "SMTP server address, if different from --hostname"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-starttls",
+        help => "Use STARTTLS (explicit SSL)"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-ssl",
+        help => "Use SSL (implicit)"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-timeout=i",
+        help => "SMTP timeout"
+    );
+
+$plugin->add_arg(
+        spec => "smtp-username=s",
+        help => "Username"
+    );
+
+$plugin->add_arg(
+        spec => "ssl",
+        help => "Use SSL (implicit SSL)"
+    );
+
+$plugin->add_arg(
+        spec => "starttls",
+        help => "Use STARTTLS (explicit SSL)"
+    );
+
+$plugin->add_arg(
+        spec => "username=s",
+        help => "Username"
+    );
+
+$plugin->add_arg(
+        spec => "warning|w=i",
+        help => "Exit with WARNING after <threshold> seconds have passed."
+    );
+
+$plugin->getopts();
+
+##
+## Parse options to get to defaults
+##
+
+my $time_start = time;
+
+# The host address(es) to check
+if (!$plugin->opts->hostname) {
+    $plugin->nagios_exit(ERROR, "No hostname for IMAP specified")
+        unless $plugin->opts->{'imap-server'};
+
+    $plugin->nagios_exit(ERROR, "No hostname for SMTP specified")
+        unless $plugin->opts->{'smtp-server'};
+
+} else {
+    $plugin->opts->{'imap-server'} = $plugin->opts->hostname
+        unless $plugin->opts->{'imap-server'};
+
+    $plugin->opts->{'smtp-server'} = $plugin->opts->hostname
+        unless $plugin->opts->{'smtp-server'};
+
+    delete $plugin->opts->{'hostname'};
+}
+
+# SSL or STARTTLS?
+if ($plugin->opts->starttls && $plugin->opts->ssl) {
+    $plugin->nagios_exit(ERROR, "Cannot specify both starttls and ssl");
+} elsif ($plugin->opts->starttls) {
+    $plugin->opts->{'imap-starttls'} = $plugin->opts->starttls
+        unless $plugin->opts->{'imap-starttls'};
+
+    $plugin->opts->{'smtp-starttls'} = $plugin->opts->starttls
+        unless $plugin->opts->{'smtp-starttls'};
+
+    delete $plugin->opts->{'starttls'};
+} elsif ($plugin->opts->ssl) {
+    $plugin->opts->{'imap-ssl'} = $plugin->opts->ssl
+        unless $plugin->opts->{'imap-ssl'};
+
+    $plugin->opts->{'smtp-ssl'} = $plugin->opts->ssl
+        unless $plugin->opts->{'smtp-ssl'};
+
+    delete $plugin->opts->{'ssl'};
+}
+
+# Plugin specific timeouts
+$plugin->opts->{'imap-timeout'} = $plugin->opts->timeout
+    unless $plugin->opts->{'imap-timeout'};
+
+$plugin->opts->{'smtp-timeout'} = $plugin->opts->timeout
+    unless $plugin->opts->{'smtp-timeout'};
+
+##
+## Set our own timeout
+##
+local $SIG{ALRM} = sub {
+        $plugin->nagios_exit(
+                CRITICAL,
+                "Exceeded " . $plugin->opts->timeout . " seconds timeout"
+            );
+    };
+
+alarm $plugin->opts->timeout;
+
+##
+## Check if the plugins exist
+##
+foreach (@{$plugin->opts->plugins}) {
+    # Exit if the plugin does not exist.
+    $plugin->nagios_exit(
+            ERROR,
+            "Plugin " . $_ . ": No such file or directory."
+        ) unless -e $_;
+
+    # Exit if the plugin is not executable.
+    $plugin->nagios_exit(
+            ERROR,
+            "Plugin " . $_ . ": Permission denied."
+        ) unless -x $_;
+}
+
+##
+## Use our options to define the options of the individual plugins
+##
+my @bool_opts = (
+        "debug",
+        "imap-ssl",
+        "imap-starttls",
+        "smtp-ssl",
+        "smtp-starttls",
+        "ssl",
+        "starttls",
+        "verbose"
+    );
+
+# Map them so we can look them up.
+my %bool_opts = map { $_ => 1 } @bool_opts;
+
+# Placeholder for the return text and return code of each plugin.
+my %status;
+
+foreach my $exec_plugin (@{$plugin->opts->plugins}) {
+    my $exec_options = "";
+
+    foreach my $option_key (keys %{$plugin->opts}) {
+        # Skip attributes internal to GetOpt
+        next if $option_key =~ /^_/;
+
+        # Skip plugins option
+        next if $option_key eq "plugins";
+
+        # Skip undefined options
+        next unless $plugin->opts->{$option_key};
+
+        # Skip any extra-opts
+        next if $option_key eq "extra-opts";
+
+        # Skip IMAP options for SMTP, and vice-versa.
+        next if $exec_plugin =~ /_imap_/ and $option_key =~ /smtp/;
+        next if $exec_plugin =~ /_smtp_/ and $option_key =~ /imap/;
+
+        # Add the option switch, and continue if the option is a boolean
+        # switch.
+        $exec_options .= " --" . $option_key and
+            next if exists($bool_opts{$option_key});
+
+        # Now map the options that are an array, such as mail-header
+        if (ref($plugin->opts->{$option_key}) eq "HASH") {
+            # We don't have these yet... right?
+        } elsif (ref($plugin->opts->{$option_key}) eq "ARRAY") {
+            foreach (@{$plugin->opts->{$option_key}}) {
+                $exec_options .= " --" . $option_key . "='" . $_ . "'";
+            }
+        } else {
+            $exec_options .= " --"
+                . $option_key
+                . "='"
+                . $plugin->opts->{$option_key}
+                . "'";
+
+        }
+    }
+
+    $status{$exec_plugin}{'result'} = `$exec_plugin $exec_options`;
+    $status{$exec_plugin}{'return'} = $?;
+}
+
+my $time_end = time;
+
+foreach my $exec_plugin (@{$plugin->opts->plugins}) {
+    # Exit with the status of the plugin that failed -- if any.
+    $plugin->nagios_exit(
+            $status{$exec_plugin}{'return'},
+            $status{$exec_plugin}{'result'}
+        ) unless $status{$exec_plugin}{'return'} == 0;
+
+    if ($plugin->opts->verbose) {
+        print $status{$exec_plugin}{'result'};
+    }
+}
+
+my $duration = ($time_end - $time_start);
+
+$plugin->nagios_exit(
+        OK,
+        "Message sent, delivered and received in " . $duration . " second(s)"
+    );
