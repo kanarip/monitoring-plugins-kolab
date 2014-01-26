@@ -75,16 +75,16 @@ A more complex example may be:
 
 What this checks, end-to-end, is the following:
 
-1)  Connection to submission,
-2)  STARTTLS,
-3)  Authentication against submission,
-4)  The Kolab SMTP Access Policy,
-5)  Relay on to the IMAP backend servers (over LMTP or SMTP),
-6)  Mail delivery to mailboxes on the IMAP backend servers (usually over LMTP),
-7)  Sieve filtering (optionally),
-8)  IMAP frontend connectivity,
-9)  IMAP proxy capability (what backend mailserver is this mailbox on),
-10) Performance.
+1.  Connection to submission,
+2.  STARTTLS,
+3.  Authentication against submission,
+4.  The Kolab SMTP Access Policy,
+5.  Relay on to the IMAP backend servers (over LMTP or SMTP),
+6.  Mail delivery to mailboxes on the IMAP backend servers (usually over LMTP),
+7.  Sieve filtering (optionally),
+8.  IMAP frontend connectivity,
+9.  IMAP proxy capability (what backend mailserver is this mailbox on),
+10. Performance.
 
 For environments that indeed do use staging, or have a shared Nagios set up for
 an otherwise multi-tenant environment, it is useful to not have to specify each
