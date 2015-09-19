@@ -102,7 +102,7 @@ $plugin->add_arg(
     );
 
 $plugin->add_arg(
-        spec => "plugins=s@",
+        spec => "plugins|p=s@",
         help => "Plugin commands to execute"
     );
 
