@@ -74,6 +74,14 @@ if [ "$1" = "config" ]; then
 fi
 
 procs=$(lsof +d ${PROCDIR} | grep -v NAME | awk '{print $9}')
+
+if [ ${#procs} -lt 2 ]; then
+    echo "connections.value 0"
+    echo "authenticated_users.value 0"
+    echo "unique_users.value 0"
+    exit 0
+fi
+
 # Print the number of connections to the imap server
 echo "connections.value $(echo "${procs}" | wc -l)"
 
