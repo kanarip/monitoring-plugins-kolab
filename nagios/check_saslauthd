@@ -1,31 +1,41 @@
 #! /usr/bin/perl -w
 
-use Nagios::Plugin;
+use Monitoring::Plugin;
 
 use vars qw($msg $state);
 
-my $plugin = Nagios::Plugin->new(
+my $plugin = Monitoring::Plugin->new(
         usage => "Usage: %s [ -v|--verbose ]  [-H <host>] [-t <timeout>] "
             . "[ -c|--critical=<threshold> ] [ -w|--warning=<threshold> ] "
+            . "[ -s|--service=<servicename> ]"
             . "[ -u|--user=<username> ] [ -p|--password=<password> ]"
     );
 
 $plugin->add_arg(
+        spec => "service|s=s",
+        help => "-s, --service=STRING\n   Servicename to use.",
+        default => ""
+    );
+
+$plugin->add_arg(
         spec => "user|u=s",
-        help => "-u, --user=STRING .  Username to use."
+        help => "-u, --user=STRING\n   Username to use.",
+        default => ""
     );
 
 $plugin->add_arg(
         spec => "password|p=s",
-        help => "-p, --password=STRING .  Password to use."
+        help => "-p, --password=STRING\n   Password to use.",
+        default => ""
     );
 
 $plugin->getopts();
 
 my $result = system(
         "/usr/sbin/testsaslauthd"
-            . " -u " . $plugin->opts->user
-            . " -p " . $plugin->opts->password
+            . " -s '" . ($plugin->opts->service =~ s/'/'"'"'/gr) . "'"
+            . " -u '" . ($plugin->opts->user =~ s/'/'"'"'/gr) . "'"
+            . " -p '" . ($plugin->opts->password =~ s/'/'"'"'/gr) . "'"
             . " > /dev/null 2>&1"
     );
 
